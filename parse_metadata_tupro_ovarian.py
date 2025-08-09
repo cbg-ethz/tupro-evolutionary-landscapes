@@ -6,8 +6,9 @@ def parse_metadata_tupro_ovarian(samples, sample_metadata_map):
   metadata_options = {}
   for sample_name, metadata in sample_metadata_map.items():
     for key, met_value in metadata.items():
-      if key in ["TP_ID", "sample_name", "Response_second-line_chemotherapy", "Age_range", "Histology",
-          "ER_Patho_grouped", "F1_LOH_grouped", "blacklisted", "TuPro_T1"]:
+      if key in ["TP_ID", "sample_name", "Response_second-line_chemotherapy", "Histology", #"Age_range",
+          "ER_Patho_grouped", "F1_LOH_grouped", "blacklisted", "TuPro_T1",
+          "early_divergence", "time_to_relapse", "time_to_death"]:
         continue
       if key not in metadata_options:
         metadata_options[key] = set()
@@ -17,7 +18,7 @@ def parse_metadata_tupro_ovarian(samples, sample_metadata_map):
 
   metadata_colors = {}
   metadata_colors['sampling_site'] = {'ascites': '#A6CEE3', 'breast':'#1F78B4', 'lymph_node':'#B2DF8A', 'omentum':'#33A02C',
-      'ovary':'#FB9A99', 'peritoneum':'#E31A1C', 'relapse':'#FDBF6F'}
+      'ovary':'#FB9A99', 'peritoneum':'#E31A1C', 'other':'#FDBF6F'}
   metadata_colors['Origin'] = {'ovary':'#1B9E77', 'peritoneal':'#D95F02', 'tubal':'#7570B3'}
   metadata_colors['primary_neo_relapse'] = {'chemo_naive':'#25C8EC', 'neo-adjuvant':'#FFC71E', 'relapse':'#A60661'}
   metadata_colors['Platinum_status'] = {'refractory':'#BEAED4', 'resistant':'#FDC086', 'sensitive':'#FFFF99',
@@ -32,6 +33,8 @@ def parse_metadata_tupro_ovarian(samples, sample_metadata_map):
   metadata_colors['OncCassette_3q26'] = {'Yes':'#FF0099', '-':'#F2F2F2'}
   metadata_colors['FIGO_01'] = {'I':'#00A600', 'II':'#E6E600', 'III':'#FB6A4A', 'IV':'#0054FF'}
   metadata_colors['has_wgd'] = {'yes':'#FC6238', 'no':'#00CDAC', 'uncertain':'#74737A'}
+  metadata_colors['Age_range'] = {"40-49": "#FFFFB3", "50-59": "#D9F0A3", "60-69": "#ADDD8E", 
+      "70-79": "#78C679", "80-89": "#41AB5D", "90-99": "#238443"}
 
   filtered_metadata_colors = {}
   for key in metadata_options:

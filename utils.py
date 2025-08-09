@@ -7,13 +7,10 @@ from anytree.importer import JsonImporter
 from utils_anytree import isRoot
 import sys
 
-def create_dir(dir_name):
-  if not os.path.exists(dir_name):
-    os.makedirs(dir_name)
-
 def isNaN(num):
   return num != num
 
+# Read gene-chromosome correspondance from file.
 def getGeneToChrMap(csv, key):
   if os.path.isfile(csv):
     gene_chr_map = {}
@@ -22,6 +19,7 @@ def getGeneToChrMap(csv, key):
       gene_chr_map[pair["gene"]] = pair["chr"]
     return gene_chr_map
 
+# Read metadata dict from file.
 def readMetadata(metadata_file):
   metadata = {}
   if os.path.isfile(metadata_file):
@@ -44,6 +42,7 @@ def readMetadata(metadata_file):
       del metadata[key]
   return metadata
 
+# Load anytree data structure from json file.
 def readJsonTrees(path, metadata, samples_to_remove=[], neutral_clones=[]):
   importer = JsonImporter()
   with open(path) as json_file:
@@ -63,13 +62,25 @@ def readJsonTrees(path, metadata, samples_to_remove=[], neutral_clones=[]):
           node.is_neutral = True
           continue
         else: 
-          if hasattr(node,"node_label") and key + "_" + str(node.node_label) in neutral_clones:
+          if hasattr(node,"node_label") and '_'.join([key, str(node.node_label)]) in neutral_clones:
             node.is_neutral = True
             continue
         node.is_neutral = False
     return anytrees
 
-# Get statistics
+
+# Remove the genes from the gene list from all the nodes in the input trees. 
+def removeGenes(anytrees, gene_list):
+  for sample, anytree in anytrees.items():
+    for node in PreOrderIter(anytree):
+      if hasattr(node, 'gene_cn_events'):
+        genes_to_remove = set(node.gene_cn_events.keys()).intersection(gene_list)
+        for gene in genes_to_remove:
+          del node.gene_cn_events[gene]
+  return anytrees
+
+
+# Get statistics.
 def printDatasetStatistics(anytrees, dataset_name):
   num_clones = 0
   sum_degree = 0
@@ -84,3 +95,16 @@ def printDatasetStatistics(anytrees, dataset_name):
   print("Num trees:", len(anytrees.keys()))
   print("Num clones:", num_clones)
   print("Avg node degree:", sum_degree / num_clones)
+
+def printMetadataStatistics(metadata, samples):
+
+  metadata_subset = {k: metadata[k] for k in samples if k in metadata}
+  df = pd.DataFrame.from_dict(metadata_subset, orient="index")
+  for col in df.columns:
+    print(f"\nValue counts for '{col}':")
+    print(df[col].value_counts())  
+  print()
+
+
+
+

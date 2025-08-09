@@ -2,18 +2,17 @@ import pandas as pd
 import numpy as np
 import copy
 import os
-from anytree import PreOrderIter
+import sys
+from anytree import PreOrderIter, RenderTree
 from scipy.spatial import distance
 from scipy.cluster import hierarchy
 
 from utils_clustering import getSimilarityClusters
-from utils_heatmaps import generateHeatmaps
-from utils_heatmaps import generateStackedHistogram
-from utils_oncotree2vec_input import saveOncotree2vecInput 
-from utils_oncotreevis import writeOncotreeVISInput
-from utils import create_dir
-from utils_anytree import isRoot
-from parse_metadata_tupro_ovarian import *
+from utils_anytree import removeTreeAttributes
+from utils_oncotree2vec import saveOncotree2vecInput
+from utils_plots import plotHierarchicalClustering 
+from utils_plots import generateStackedHistogram
+from utils_plots import plotPieChartsClusterHeterogeneity
 
 def jaccard_distance(set_1, set_2, is_malignant=True):
   # By default the jaccard distance between two empty sets is 0. If the nodes are malignant, then we want to return distance 1.
@@ -87,26 +86,12 @@ def getSubcloneDistances(anytrees_list, marker_genes):
       for node_2 in nodes:
         if node_1 < node_2:
           dist = jaccard_distance(malignant_node_gene_map[node_1][idx], malignant_node_gene_map[node_2][idx])
-          df_jaccard_distances[node_1][node_2] = dist
-          df_jaccard_distances[node_2][node_1] = dist
+          df_jaccard_distances.loc[node_1, node_2] = dist
+          df_jaccard_distances.loc[node_2, node_1] = dist
     check_distance_dataframe_integrity(df_jaccard_distances)
     dataframes[idx] = df_jaccard_distances
   return dataframes
 
-'''
-def getSubcloneClusters(df_distances, distance_threshold, plot_histogram=None, plotting_dir_prefix=None): 
-  # Cluster the clones.
-  clustering = hierarchy.linkage(
-    distance.pdist(df_distances), metric="euclidean", method="ward")
-  nodes = df_distances.index
-  return getSimilarityClusters(clustering, nodes, df_distances, distance_threshold)
-
-  if plotting_dir_prefix:
-    # Plot the big pair-wise clone distance heatmap.
-    sample_label_colors, color_codes = parse_metadata_tupro_ovarian(df_distances.index, metadata)
-    generate_heatmaps(df_distances, clustering, clone_clusters, sample_label_colors, color_codes, plotting_dir_prefix,
-        plot_histogram=True, plot_cluster_heatmaps=False)
-'''
 
 def setMatchingLabels(anytrees, clone_clusters):
   malignant_node_matching_labels = {}
@@ -127,51 +112,128 @@ def setMatchingLabels(anytrees, clone_clusters):
       else:
         node.matching_label = 1 # neutral or aux nodes
 
-def processTrees(anytrees_list, dna_marker_genes, highlighted_genes, metadata, out_dir_prefix, df_distances_csv=None):
+def processCNTrees(anytrees_list, marker_genes, df_distances_csv, out_dir, metadata):
  
-  print("Processing trees", out_dir_prefix, "...")
+  print("Processing CN trees...")
 
-  create_dir(out_dir_prefix)
-  plotting_dir = os.path.join(out_dir_prefix, "plots")
-  create_dir(plotting_dir)
-  filename_prefix = os.path.basename(out_dir_prefix)
-
-  if df_distances_csv:
+  # Combine gene sets. 
+  if os.path.isfile(df_distances_csv):
     df_combined_distances = pd.read_csv(df_distances_csv, index_col=0)  
+    print("Found", df_distances_csv)
   else:
-    dataframes = getSubcloneDistances(anytrees_list, dna_marker_genes)
-    df_combined_distances = pd.concat(list(dataframes.values())).min(level=0) #groupby(level=0).min()
-    df_combined_distances.to_csv(os.path.join(out_dir_prefix, "_".join([filename_prefix, "df_distances.csv"])))  
-  
-  reference_anytrees = anytrees_list[-1]
+    dataframes = getSubcloneDistances(anytrees_list, marker_genes)
+    df_combined_distances = pd.concat(dataframes.values()).groupby(level=0).min()
+    df_combined_distances.to_csv(df_distances_csv)
+    print("Saved ", df_distances_csv)
+
+  # Process trees in oncotree2vec input format. 
+  cn_dir = os.path.join(out_dir, "cn")
+  os.makedirs(cn_dir, exist_ok=True)
+  oncotree2vec_dir = os.path.join(cn_dir, "oncotree2vec_cnTrees")
+  os.makedirs(oncotree2vec_dir, exist_ok=True)
+
+  empty_trees = {}
+  for key, tree in anytrees_list[-1].items():
+    empty_trees[key] = removeTreeAttributes(tree)
 
   clustering = hierarchy.linkage(distance.pdist(df_combined_distances), metric="euclidean", method="ward")
   all_cluster_sizes = []
   for distance_threshold in np.linspace(0, 0.9, num=10):
     distance_threshold = round(distance_threshold,1)
     clone_clusters = getSimilarityClusters(clustering, df_combined_distances, distance_threshold)
+
+    anytrees = copy.deepcopy(empty_trees)
+    setMatchingLabels(anytrees, clone_clusters)
+    if "ODAFUGU" in anytrees:
+      test_tree = anytrees["ODAFUGU"]
+      assert test_tree.root.matching_label == 0
+      print(PreOrderIter(test_tree))
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == -100), None).matching_label == 1
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == 103), None).matching_label == 1
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == 109), None).matching_label == 1
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == 116), None).matching_label == 1
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == 96), None).matching_label > 1
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == 114), None).matching_label > 1
+    oncotree2vec_subdir = os.path.join(oncotree2vec_dir, str(distance_threshold))
+    os.makedirs(oncotree2vec_subdir)
+    saveOncotree2vecInput(anytrees, oncotree2vec_subdir, duplicate_trees=True)
+
     clone_cluster_sizes = [len(cluster) for cluster in clone_clusters]
     for item in clone_cluster_sizes:
       all_cluster_sizes.append({"threshold":distance_threshold, "size":item})
 
-    anytrees = copy.deepcopy(reference_anytrees)
+  figure_dir = os.path.join(cn_dir, "figures")
+  os.makedirs(figure_dir, exist_ok=True)
+  generateStackedHistogram(pd.DataFrame.from_dict(all_cluster_sizes), os.path.join(figure_dir, "subclone_sizes"))
+
+
+def processRNATrees(scatrex_trees, rna_signatures, scatrex_cn_nodeid_map, out_dir, metadata):
+
+  print("Building RNA signature trees...")
+
+  rna_dir = os.path.join(out_dir, "rna")
+  os.makedirs(rna_dir, exist_ok=True) 
+  oncotree2vec_dir = os.path.join(rna_dir, "oncotree2vec_rnaTrees")
+  os.makedirs(oncotree2vec_dir, exist_ok=True)
+  figures_dir = os.path.join(rna_dir, "figures")
+  os.makedirs(figures_dir, exist_ok=True)
+
+  empty_trees = {}
+  clone_sizes = {}
+  for key, tree in scatrex_trees.items():
+    for node in PreOrderIter(tree):
+      node_name = "_".join([key, node.node_id])
+      clone_sizes[node_name] = node.num_cells 
+    empty_trees[key] = removeTreeAttributes(tree) 
+
+  metric = "correlation"
+  distance_matrices = {}
+  for key, df in rna_signatures.items():
+    pairwise_distances = distance.pdist(df, metric=metric)
+    df_distances = pd.DataFrame(distance.squareform(pairwise_distances))
+    df_distances.index = df.index
+    df_distances.columns = df.index
+    distance_matrices[key] = df_distances
+
+    clustering = hierarchy.linkage(pairwise_distances, metric="euclidean", method="ward")
+    clone_clusters = getSimilarityClusters(clustering, df_distances, 0.75)
+
+    plotHierarchicalClustering(
+        df = df_distances,
+        do_clustering = True,
+        precomputed_clustering = clustering,
+        clusters = clone_clusters,
+        cmap="YlOrBr_r",
+        metadata=metadata,
+        filename=os.path.join(figures_dir, "subclone_distances_" + str(key)),      
+    )
+
+    plotPieChartsClusterHeterogeneity(
+      clone_clusters, 
+      clone_sizes,
+      os.path.join(figures_dir, "pie_chart_" + str(key)), 
+    )
+
+    anytrees = copy.deepcopy(empty_trees)
     setMatchingLabels(anytrees, clone_clusters)
-    oncotree2vec_dir = os.path.join(out_dir_prefix, "_".join([filename_prefix, "oncotree2vec_input", str(distance_threshold)]))
-    saveOncotree2vecInput(anytrees, oncotree2vec_dir, duplicate_trees=True)
+    if key == 1 and "OBABACY" in anytrees:
+      test_tree = anytrees["OBABACY"]
+      assert test_tree.root.matching_label == 0
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == "B"), None).matching_label > 1
+      assert next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == "C"), None).matching_label == 1 # missing from scDEF
+      label_node_1 = next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == "D"), None).matching_label
+      label_node_2 = next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == "E"), None).matching_label
+      label_node_3 = next((n for n in PreOrderIter(test_tree) if getattr(n, "node_id", None) == "F"), None).matching_label
+      assert label_node_1 > 1
+      assert label_node_2 > 1
+      assert label_node_3 > 1
+      assert len({label_node_1, label_node_2, label_node_3}) == 3 # values are not equal to each other
 
-    oncotreeVIS_path = os.path.join(out_dir_prefix, filename_prefix + "_".join(["oncotreeVIS", str(distance_threshold)]) + ".json")
-    oncotreeVIS_path_oncotree2vec = os.path.join(oncotree2vec_dir, "trees.json")
-    writeOncotreeVISInput(anytrees, metadata, [oncotreeVIS_path, oncotreeVIS_path_oncotree2vec], "", highlighted_genes)
-
-    if distance_threshold == 0.8:
-      sample_label_colors, color_codes = parse_metadata_tupro_ovarian(df_combined_distances.index, metadata)
-      generateHeatmaps(df_combined_distances, clustering, clone_clusters, sample_label_colors, color_codes, plotting_dir + "/" + filename_prefix + "_subclone_dist",
-          plot_histogram=True, plot_cluster_heatmaps=True)
-
-  generateStackedHistogram(pd.DataFrame.from_dict(all_cluster_sizes), plotting_dir + "/" + filename_prefix + "_histo_stacked_subclone_sizes.png")
-  return 
-  
-
-
-
+    oncotree2vec_subdir = os.path.join(oncotree2vec_dir, str(key))
+    os.makedirs(oncotree2vec_subdir)
+    # Set SCATrEx the node ids to the corresponding SCICoNE ones, because ocnotree2vec wants numerical ids.
+    for key, tree in anytrees.items():
+      for node in PreOrderIter(tree):
+        node.node_id = scatrex_cn_nodeid_map[key][node.node_id]
+    saveOncotree2vecInput(anytrees, oncotree2vec_subdir, duplicate_trees=True)
 

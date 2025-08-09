@@ -5,9 +5,9 @@ import copy
 import sys
 from utils_anytree import isRoot
 
-def createOncotreeVISInput(original_anytrees, metadata, dataset_name):
+def createOncotreeVISInput(original_anytrees, metadata):
  
-  print("Writing oncotreVIS input for", dataset_name, "...") 
+  print("Writing oncotreVIS input...") 
 
   anytrees = copy.deepcopy(original_anytrees)
   tree_map = {}
@@ -49,23 +49,23 @@ def createOncotreeVISInput(original_anytrees, metadata, dataset_name):
     json_tree = json.loads(exporter.export(tree))
     tree_map[sample_name] = {}
     tree_map[sample_name]["tree"] = json_tree 
-    if sample_name in metadata:
-      tree_map[sample_name]["metadata"] = metadata[sample_name]
+    sample_name_prefix = sample_name.split("_")[0]
+    if sample_name_prefix in metadata:
+      tree_map[sample_name]["metadata"] = metadata[sample_name_prefix]
     else:
       tree_map[sample_name]["metadata"] = {}
   return tree_map
 
-def writeOncotreeVISInput(anytrees_event, metadata, out_paths, dataset_name, highlighted_genes={}):
-  trees_oncotreevis = createOncotreeVISInput(anytrees_event, metadata, dataset_name)
+def writeOncotreeVISInput(anytrees, metadata, out_path, highlighted_genes={}):
+  trees_oncotreevis = createOncotreeVISInput(anytrees, metadata)
   json_oncotreevis = {}
   json_oncotreevis["trees"] = trees_oncotreevis
   if len(highlighted_genes):
     json_oncotreevis["highlighted_genes"] = highlighted_genes
 
-  for out_path in out_paths:
-    file = open(out_path, "w")
-    file.write(json.dumps(json_oncotreevis))
-    file.close()
+  file = open(out_path, "w")
+  file.write(json.dumps(json_oncotreevis))
+  file.close()
 
 
 
